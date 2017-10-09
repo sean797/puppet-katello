@@ -32,9 +32,22 @@ class katello::pulp (
   Boolean $db_unsafe_autoretry = $::katello::pulp_db_unsafe_autoretry,
   Optional[Enum['majority', 'all']] $db_write_concern = $::katello::pulp_db_write_concern,
   Boolean $manage_db = $::katello::pulp_manage_db,
+  Boolean $manage_httpd = $::katello::pulp_manage_httpd,
 ) {
   include ::certs
   include ::certs::qpid_client
+
+  if $manage_httpd {
+    include ::certs::apache
+
+    $https_cert = $::certs::apache::apache_cert
+    $https_key  = $::certs::apache::apache_key
+    $ca_cert    = $::certs::katello_server_ca_cert
+  } else {
+    $https_cert = undef
+    $https_key  = undef
+    $ca_cert    = undef
+  }
 
   class { '::pulp':
     messaging_url          => $messaging_url,
@@ -50,7 +63,7 @@ class katello::pulp (
     proxy_password         => $proxy_password,
     yum_max_speed          => $yum_max_speed,
     manage_broker          => false,
-    manage_httpd           => false,
+    manage_httpd           => $manage_httpd,
     manage_plugins_httpd   => true,
     manage_squid           => true,
     enable_rpm             => $enable_yum,
@@ -65,6 +78,9 @@ class katello::pulp (
     repo_auth              => true,
     puppet_wsgi_processes  => 1,
     enable_katello         => true,
+    https_cert             => $https_cert,
+    https_key              => $https_key,
+    ca_cert                => $ca_cert,
     subscribe              => Class['certs', 'certs::qpid_client'],
     worker_timeout         => $pulp_worker_timeout,
     db_name                => $db_name,
@@ -84,9 +100,30 @@ class katello::pulp (
 
   contain ::pulp
 
-  foreman::config::passenger::fragment { 'pulp':
-    content     => file('katello/pulp-apache.conf'),
-    ssl_content => file('katello/pulp-apache-ssl.conf'),
+  if $manage_httpd {
+    # TODO: pulp::apache::fragment should take care of this?
+    file { '/etc/pulp/vhosts80/static-pub.conf':
+      ensure  => file,
+      content => file('katello/pub-apache.conf'),
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0640',
+      notify  => Service['httpd'],
+    }
+
+    pulp::apache::fragment { 'httpd_pub':
+      ssl_content => file('katello/pub-apache.conf'),
+    }
+  } else {
+    foreman::config::passenger::fragment { 'pulp':
+      content     => file('katello/pulp-apache.conf'),
+      ssl_content => file('katello/pulp-apache-ssl.conf'),
+    }
+
+    foreman::config::passenger::fragment { 'pub':
+      content     => file('katello/pub-apache.conf'),
+      ssl_content => file('katello/pub-apache.conf'),
+    }
   }
 
   # NB: we define this here to avoid a dependency cycle. It is not a problem if
