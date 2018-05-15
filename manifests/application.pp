@@ -22,6 +22,7 @@ class katello::application (
   Optional[String] $proxy_username = $::katello::proxy_username,
   Optional[String] $proxy_password = $::katello::proxy_password,
   Integer[0] $rest_client_timeout = $::katello::params::rest_client_timeout,
+  Optional[Stdlib::Absolutepath] $certs_tar = $katello::certs_tar,
 ) {
   include ::foreman
   include ::certs
@@ -34,6 +35,12 @@ class katello::application (
   $post_sync_url = "${::foreman::foreman_url}${deployment_url}/api/v2/repositories/sync_complete?token=${post_sync_token}"
   $candlepin_ca_cert = $::certs::ca_cert
   $pulp_ca_cert = $::certs::katello_server_ca_cert
+
+  if $certs_tar {
+    certs::tar_extract { $certs_tar:
+      before => Class['certs'],
+    }
+  }
 
   foreman_config_entry { 'pulp_client_cert':
     value          => $::certs::pulp_client::client_cert,
